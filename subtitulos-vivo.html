@@ -183,6 +183,8 @@
   </details>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/eruda"></script>
+<script>eruda.init();</script>
 <script src="https://cdn.jsdelivr.net/npm/vosk-browser@0.0.8/dist/vosk.js"></script>
 <script>
 (function () {
@@ -233,11 +235,26 @@
     els.modelProgress.value = 0;
     els.modelProgressText.textContent = 'Descargando modelo (' + lang + ')… esto puede tardar según tu conexión.';
     setStatus('Cargando modelo…', 'busy');
+    console.log('[subtitulos] Iniciando carga de modelo:', MODEL_URLS[lang]);
     try {
       if (recognizer) { try { recognizer.remove(); } catch(e){} recognizer = null; }
       if (model) { try { model.terminate(); } catch(e){} model = null; }
 
+      console.log('[subtitulos] Verificando accesibilidad del modelo con fetch HEAD...');
+      try {
+        const headResp = await fetch(MODEL_URLS[lang], { method: 'HEAD' });
+        console.log('[subtitulos] HEAD status:', headResp.status, 'headers:', [...headResp.headers.entries()]);
+      } catch (headErr) {
+        console.error('[subtitulos] HEAD fetch falló (probable bloqueo CORS o de red):', headErr);
+      }
+
+      console.log('[subtitulos] Llamando Vosk.createModel...');
+      const stuckWarning = setTimeout(() => {
+        console.warn('[subtitulos] Han pasado 20s y createModel no resuelve ni falla. Revisa la pestaña Network de esta consola: si no ves una petición a alphacephei.com, el Worker probablemente no arrancó.');
+      }, 20000);
       model = await Vosk.createModel(MODEL_URLS[lang]);
+      clearTimeout(stuckWarning);
+      console.log('[subtitulos] Modelo creado con éxito.');
       currentLang = lang;
 
       model.registerRecognizer = model.registerRecognizer || null;
@@ -267,7 +284,7 @@
       setStatus('Modelo (' + lang + ') listo.', 'ok');
       els.startBtn.disabled = false;
     } catch (err) {
-      console.error(err);
+      console.error('[subtitulos] Error cargando el modelo:', err);
       els.modelProgressWrap.style.display = 'none';
       setStatus('Error cargando el modelo: ' + (err && err.message ? err.message : err), 'err');
     } finally {
