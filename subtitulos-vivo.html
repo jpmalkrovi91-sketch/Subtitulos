@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Subtítulos en vivo (offline)</title>
+<style>
+  :root {
+    --bg: #101014;
+    --panel: #18181f;
+    --border: #2a2a33;
+    --text: #eaeaf0;
+    --muted: #9a9aa5;
+    --accent: #4f8cff;
+    --accent-dim: #2a3f66;
+    --danger: #ff5c5c;
+    --ok: #3ecf6e;
+    --caption-bg: rgba(0,0,0,0.75);
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    height: 100%;
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, Roboto, "Segoe UI", Helvetica, Arial, sans-serif;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  #app {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    min-height: 100%;
+  }
+  h1 {
+    font-size: 18px;
+    font-weight: 600;
+    margin: 4px 0 0 0;
+  }
+  .sub {
+    color: var(--muted);
+    font-size: 13px;
+    margin: 0 0 8px 0;
+  }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 14px;
+  }
+  .row {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  label { font-size: 13px; color: var(--muted); }
+  select, button {
+    font-size: 15px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: #1f1f28;
+    color: var(--text);
+    padding: 9px 12px;
+  }
+  button {
+    cursor: pointer;
+    font-weight: 600;
+    border: none;
+  }
+  button.primary { background: var(--accent); color: white; }
+  button.primary:disabled { background: var(--accent-dim); color: #8ea3d6; cursor: not-allowed; }
+  button.danger { background: var(--danger); color: white; }
+  button.ghost { background: transparent; border: 1px solid var(--border); color: var(--text); }
+  #status {
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); flex: none; }
+  .dot.ok { background: var(--ok); }
+  .dot.err { background: var(--danger); }
+  .dot.busy { background: #e0c341; animation: pulse 1s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
+  progress { width: 100%; accent-color: var(--accent); }
+
+  #captionBox {
+    background: var(--caption-bg);
+    border-radius: 12px;
+    min-height: 90px;
+    padding: 16px;
+    font-size: 22px;
+    line-height: 1.35;
+    display: flex;
+    align-items: center;
+  }
+  #captionBox .partial { color: #c7c7d6; }
+  #captionBox .placeholder { color: var(--muted); font-size: 15px; }
+
+  #transcript {
+    width: 100%;
+    min-height: 220px;
+    resize: vertical;
+    background: #0d0d12;
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px;
+    font-size: 14px;
+    line-height: 1.5;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  .footer-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  .hint { font-size: 12.5px; color: var(--muted); }
+  .hint b { color: var(--text); }
+  details summary { cursor: pointer; color: var(--accent); font-size: 13px; }
+  details { font-size: 13px; color: var(--muted); }
+</style>
+</head>
+<body>
+<div id="app">
+  <div>
+    <h1>Subtítulos en vivo — offline</h1>
+    <p class="sub">Captura el audio de una pestaña (motor Vosk, corre local, nada se sube a internet una vez descargado el modelo).</p>
+  </div>
+
+  <div class="panel">
+    <div class="row">
+      <label for="lang">Idioma del audio a transcribir</label>
+      <select id="lang">
+        <option value="es">Español</option>
+        <option value="en">Inglés</option>
+      </select>
+      <button id="loadModelBtn" class="ghost">Descargar / cargar modelo</button>
+    </div>
+    <div id="modelProgressWrap" style="display:none; margin-top:10px;">
+      <progress id="modelProgress" max="100" value="0"></progress>
+      <div class="hint" id="modelProgressText">Descargando modelo…</div>
+    </div>
+    <div id="status" style="margin-top:10px;">
+      <span class="dot" id="statusDot"></span>
+      <span id="statusText">Modelo no cargado todavía.</span>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="row">
+      <button id="startBtn" class="primary" disabled>Compartir pestaña y empezar</button>
+      <button id="stopBtn" class="danger" style="display:none;">Detener</button>
+    </div>
+    <p class="hint" style="margin-top:8px;">
+      Al compartir, elige la <b>pestaña</b> de tu plataforma VRI (no "pantalla completa" ni "ventana") y marca la casilla
+      <b>"Compartir audio de la pestaña"</b> — en Chrome/Chromium solo aparece esa opción cuando seleccionas "Pestaña de Chrome".
+    </p>
+  </div>
+
+  <div id="captionBox"><span class="placeholder">Los subtítulos aparecerán aquí…</span></div>
+
+  <div class="panel">
+    <div class="row" style="justify-content: space-between;">
+      <label for="transcript">Transcripción (para tus notas)</label>
+      <div class="footer-actions">
+        <button id="copyBtn" class="ghost">Copiar</button>
+        <button id="clearBtn" class="ghost">Limpiar</button>
+      </div>
+    </div>
+    <textarea id="transcript" readonly placeholder="El texto final de cada frase se va acumulando aquí…"></textarea>
+  </div>
+
+  <details>
+    <summary>Notas técnicas / solución de problemas</summary>
+    <p>
+      - El modelo se descarga la primera vez (≈40–50 MB) desde alphacephei.com (repositorio oficial de Vosk). Si tu red bloquea ese dominio, no cargará — prueba con otra red o descarga el modelo manualmente y sirve esta página desde el mismo origen que el modelo.<br>
+      - Si el navegador no ofrece la casilla "compartir audio", asegúrate de elegir específicamente la pestaña (no la ventana ni la pantalla completa) en el selector de captura.<br>
+      - Esta página no manda audio a ningún servidor: todo el reconocimiento ocurre en tu tablet vía WebAssembly.<br>
+      - Guarda este archivo .html y ábrelo directamente en tu navegador (doble toque / abrir con Chrome). No necesita instalación.
+    </p>
+  </details>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/vosk-browser@0.0.8/dist/vosk.js"></script>
+<script>
+(function () {
+  const MODEL_URLS = {
+    es: "https://alphacephei.com/vosk/models/vosk-model-small-es-0.42.zip",
+    en: "https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip"
+  };
+
+  const els = {
+    lang: document.getElementById('lang'),
+    loadModelBtn: document.getElementById('loadModelBtn'),
+    modelProgressWrap: document.getElementById('modelProgressWrap'),
+    modelProgress: document.getElementById('modelProgress'),
+    modelProgressText: document.getElementById('modelProgressText'),
+    statusDot: document.getElementById('statusDot'),
+    statusText: document.getElementById('statusText'),
+    startBtn: document.getElementById('startBtn'),
+    stopBtn: document.getElementById('stopBtn'),
+    captionBox: document.getElementById('captionBox'),
+    transcript: document.getElementById('transcript'),
+    copyBtn: document.getElementById('copyBtn'),
+    clearBtn: document.getElementById('clearBtn'),
+  };
+
+  let model = null;
+  let recognizer = null;
+  let audioContext = null;
+  let sourceNode = null;
+  let processorNode = null;
+  let captureStream = null;
+  let currentLang = null;
+
+  function setStatus(text, kind) {
+    els.statusText.textContent = text;
+    els.statusDot.className = 'dot' + (kind ? ' ' + kind : '');
+  }
+
+  async function loadModel() {
+    const lang = els.lang.value;
+    if (model && currentLang === lang) {
+      setStatus('Modelo (' + lang + ') ya cargado.', 'ok');
+      els.startBtn.disabled = false;
+      return;
+    }
+    els.loadModelBtn.disabled = true;
+    els.startBtn.disabled = true;
+    els.modelProgressWrap.style.display = 'block';
+    els.modelProgress.value = 0;
+    els.modelProgressText.textContent = 'Descargando modelo (' + lang + ')… esto puede tardar según tu conexión.';
+    setStatus('Cargando modelo…', 'busy');
+    try {
+      if (recognizer) { try { recognizer.remove(); } catch(e){} recognizer = null; }
+      if (model) { try { model.terminate(); } catch(e){} model = null; }
+
+      model = await Vosk.createModel(MODEL_URLS[lang]);
+      currentLang = lang;
+
+      model.registerRecognizer = model.registerRecognizer || null;
+
+      recognizer = new model.KaldiRecognizer(16000);
+      recognizer.setWords(true);
+
+      recognizer.on('result', (message) => {
+        const text = (message.result && message.result.text) ? message.result.text.trim() : '';
+        if (text) {
+          els.transcript.value += (els.transcript.value ? '\n' : '') + text;
+          els.transcript.scrollTop = els.transcript.scrollHeight;
+        }
+        els.captionBox.innerHTML = text
+          ? escapeHtml(text)
+          : '<span class="placeholder">Escuchando…</span>';
+      });
+
+      recognizer.on('partialresult', (message) => {
+        const partial = (message.result && message.result.partial) ? message.result.partial.trim() : '';
+        if (partial) {
+          els.captionBox.innerHTML = '<span class="partial">' + escapeHtml(partial) + '</span>';
+        }
+      });
+
+      els.modelProgressWrap.style.display = 'none';
+      setStatus('Modelo (' + lang + ') listo.', 'ok');
+      els.startBtn.disabled = false;
+    } catch (err) {
+      console.error(err);
+      els.modelProgressWrap.style.display = 'none';
+      setStatus('Error cargando el modelo: ' + (err && err.message ? err.message : err), 'err');
+    } finally {
+      els.loadModelBtn.disabled = false;
+    }
+  }
+
+  function escapeHtml(s) {
+    const d = document.createElement('div');
+    d.innerText = s;
+    return d.innerHTML;
+  }
+
+  async function startCapture() {
+    if (!recognizer) {
+      setStatus('Carga el modelo primero.', 'err');
+      return;
+    }
+    try {
+      captureStream = await navigator.mediaDevices.getDisplayMedia({
+        video: true, // requerido por la API aunque no lo mostremos
+        audio: true
+      });
+    } catch (err) {
+      console.error(err);
+      setStatus('No se pudo capturar la pestaña (¿cancelaste el permiso?).', 'err');
+      return;
+    }
+
+    const audioTracks = captureStream.getAudioTracks();
+    if (!audioTracks.length) {
+      setStatus('Compartiste sin audio. Vuelve a intentar y marca "Compartir audio de la pestaña".', 'err');
+      captureStream.getTracks().forEach(t => t.stop());
+      captureStream = null;
+      return;
+    }
+
+    // Si el usuario detiene la captura desde el propio Chrome (barra de "dejar de compartir")
+    audioTracks[0].addEventListener('ended', stopCapture);
+
+    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    sourceNode = audioContext.createMediaStreamSource(captureStream);
+
+    // ScriptProcessorNode: obsoleto pero de soporte más amplio que AudioWorklet en WebViews HarmonyOS/AOSP.
+    processorNode = audioContext.createScriptProcessor(4096, 1, 1);
+    sourceNode.connect(processorNode);
+    // Necesario conectar a destination (silenciado) para que el processor reciba callbacks en algunos navegadores.
+    const silentGain = audioContext.createGain();
+    silentGain.gain.value = 0;
+    processorNode.connect(silentGain);
+    silentGain.connect(audioContext.destination);
+
+    processorNode.onaudioprocess = (event) => {
+      try {
+        recognizer.acceptWaveform(event.inputBuffer);
+      } catch (e) {
+        console.error('acceptWaveform error', e);
+      }
+    };
+
+    els.startBtn.style.display = 'none';
+    els.stopBtn.style.display = 'inline-block';
+    els.captionBox.innerHTML = '<span class="placeholder">Escuchando…</span>';
+    setStatus('Capturando y transcribiendo…', 'ok');
+  }
+
+  function stopCapture() {
+    if (processorNode) { try { processorNode.disconnect(); } catch(e){} processorNode.onaudioprocess = null; processorNode = null; }
+    if (sourceNode) { try { sourceNode.disconnect(); } catch(e){} sourceNode = null; }
+    if (audioContext) { try { audioContext.close(); } catch(e){} audioContext = null; }
+    if (captureStream) { captureStream.getTracks().forEach(t => t.stop()); captureStream = null; }
+
+    els.startBtn.style.display = 'inline-block';
+    els.stopBtn.style.display = 'none';
+    setStatus('Detenido. Modelo (' + currentLang + ') sigue cargado.', 'ok');
+  }
+
+  els.loadModelBtn.addEventListener('click', loadModel);
+  els.startBtn.addEventListener('click', startCapture);
+  els.stopBtn.addEventListener('click', stopCapture);
+  els.copyBtn.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(els.transcript.value);
+      setStatus('Transcripción copiada.', 'ok');
+    } catch (e) {
+      els.transcript.select();
+      document.execCommand('copy');
+    }
+  });
+  els.clearBtn.addEventListener('click', () => { els.transcript.value = ''; });
+
+  setStatus('Elige idioma y pulsa "Descargar / cargar modelo".', null);
+})();
+</script>
+</body>
+</html>
